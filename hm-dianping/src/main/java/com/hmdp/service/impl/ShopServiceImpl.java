@@ -72,7 +72,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
                         try {
                             Shop shop = this.getById(id);
                             RedisExpire<Shop> shopRedisExpire = new RedisExpire<>();
-                            shopRedisExpire.setExpireTime(LocalDateTime.now().plusSeconds(10));
+                            shopRedisExpire.setExpireTime(LocalDateTime.now().plusMinutes(30));
                             shopRedisExpire.setData(shop);
                             stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY+ id, JSONUtil.toJsonStr(shopRedisExpire));
                         } finally {
@@ -81,19 +81,18 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
                         }
                     });
 //              先返回旧数据，允许暂时的不一致
-                String jsonStr = JSONUtil.toJsonStr(obj.getData());
-                return Result.ok(JSONUtil.toBean(jsonStr,Shop.class));
+                return Result.ok(obj.getData());
             }
 
-            Shop shop = JSONUtil.toBean(shopStr, Shop.class);
-            return Result.ok(shop);
+            RedisExpire bean = JSONUtil.toBean(shopStr, RedisExpire.class);
+            return Result.ok(bean.getData());
         }
 
         if(shopStr == null) { //       命中缓存穿透
             Shop shop = this.getById(id);
             if(shop != null) {
                 RedisExpire redisExpire = new RedisExpire();
-                redisExpire.setExpireTime(LocalDateTime.now().plusSeconds(10));
+                redisExpire.setExpireTime(LocalDateTime.now().plusMinutes(30));
                 redisExpire.setData(shop);
                 stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY+ id, JSONUtil.toJsonStr(redisExpire));
                 return Result.ok(shop);
