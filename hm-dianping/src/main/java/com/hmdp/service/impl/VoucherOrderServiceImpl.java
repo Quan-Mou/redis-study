@@ -1,34 +1,32 @@
 package com.hmdp.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.SeckillVoucher;
-import com.hmdp.entity.Voucher;
 import com.hmdp.entity.VoucherOrder;
 import com.hmdp.handler.RedisIdGenerate;
 import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.hmdp.service.IVoucherService;
 import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.UserHolder;
+import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.annotation.ReadOnlyProperty;
+import org.springframework.aop.framework.AopContext;
+import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
-import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 /**
  * <p>
@@ -39,6 +37,7 @@ import java.util.concurrent.TimeUnit;
  * @since 2021-12-22
  */
 @Service
+@Slf4j
 public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, VoucherOrder> implements IVoucherOrderService {
     @Resource
     private ISeckillVoucherService seckillVoucherService;
@@ -50,7 +49,88 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private RedissonClient redissonClient;
 
 
+    private static  DefaultRedisScript<Long> redisScript;
+    static  {
+        redisScript = new DefaultRedisScript<>();
 
+        String script =
+                "                local voucherId = KEYS[1]\n" +
+                        "                local userId = ARGV[1]\n" +
+                        "\n" +
+                        "                        -- 1. 判断库存\n" +
+                        "                local stock = tonumber(redis.call('GET', 'seckill:stock:' .. voucherId))\n" +
+                        "                if stock == nil or stock <= 0 then\n" +
+                        "                return 1\n" +
+                        "                end\n" +
+                        "\n" +
+                        "                        -- 2. 判断是否已下单\n" +
+                        "                if redis.call('SISMEMBER', 'seckill:order:' .. voucherId, userId) == 1 then\n" +
+                        "                return 2\n" +
+                        "                end\n" +
+                        "\n" +
+                        "                        -- 3. 扣库存 + 记录用户\n" +
+                        "                redis.call('DECR', 'seckill:stock:' .. voucherId)\n" +
+                        "                redis.call('SADD', 'seckill:order:' .. voucherId, userId)\n" +
+                        "                return 0";
+
+        redisScript.setScriptText(script);
+        redisScript.setResultType(Long.class);
+
+    }
+
+
+    @Resource
+    private ApplicationContext applicationContext;
+
+    private static ExecutorService voucherOrderWorker = Executors.newSingleThreadExecutor();
+
+    private static BlockingQueue<VoucherOrder> voucherOrderTaskQueue = new LinkedBlockingQueue<>(300);
+
+    private VoucherOrderServiceImpl proxy;
+
+
+    @PostConstruct
+    private void  init() {
+        voucherOrderWorker.execute(() -> {
+            while (true) {
+                try {
+                    VoucherOrder order = voucherOrderTaskQueue.take();
+                    proxy.createVoucherOrder(order);
+                } catch (InterruptedException e) {
+                    log.info("创建订单出现异常:{}",e.getMessage());
+                }
+            }
+        });
+    }
+
+    @Transactional
+    public void createVoucherOrder(VoucherOrder voucherOrder) {
+
+        RLock lock = redissonClient.getLock(RedisConstants.LOCK_SECKILL_KEY + voucherOrder.getUserId());
+        boolean isLocked = lock.tryLock();
+        if(!isLocked){
+            log.info("不允许重复下单");
+            return;
+        }
+        try {
+            //                   1. mysql 扣减库存
+            //        3.扣减库存  update xxx set stock = stock - 1 where stock > 0 and voucher_id = ?
+            boolean isSuccess = seckillVoucherService.update()
+                    .setSql("stock = stock - 1")
+                    .gt("stock",0)
+                    .eq("voucher_id", voucherOrder.getVoucherId()).update();
+
+
+//      2.添加订单数据
+//        手动获取代理对象
+            proxy.save(voucherOrder);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+
+    @Transactional
     @Override
     public Result seckillVoucher(Long voucherId) {
 //        1.查询秒杀券信息
@@ -72,36 +152,19 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         Long orderId = null;
         Long userId = UserHolder.getUser().getId();
         String uuid = UUID.randomUUID().toString();
-//        Boolean lock = stringRedisTemplate.opsForValue().setIfAbsent(
-//                RedisConstants.LOCK_SECKILL_KEY + userId + ":" + voucherId, uuid,
-//                RedisConstants.LOCK_SHOP_TTL, TimeUnit.SECONDS);
-//      获取可重入锁
-        RLock lock = redissonClient.getLock(RedisConstants.LOCK_SECKILL_KEY + userId + ":" + voucherId);
-        try {
-//           尝试获取锁（等待时间，锁自动释放时间，时间单位）
-            boolean isLocked = lock.tryLock(3, 15, TimeUnit.SECONDS);
-            if(!isLocked) {
-                return Result.fail("不能重复下单！");
-            }
+                Long value = stringRedisTemplate.execute(redisScript, Collections.singletonList(voucherId.toString()), userId.toString());
 
-            try {
-                QueryWrapper<VoucherOrder> queryWrapper = new QueryWrapper<>();
-                queryWrapper.eq("user_id",UserHolder.getUser().getId()).eq("voucher_id",voucherId);
-//            select x from voucher_order where user_id = ? and voucher_id = ?
-                VoucherOrder iSvoucherOrder = this.getOne(queryWrapper);
-                if(iSvoucherOrder != null) {
-                    return Result.fail("该优惠卷只能抢购一次！");
+                if(value == null) {
+                    return Result.fail("库存不足！");
                 }
-                //        3.扣减库存  update xxx set stock = stock - 1 where stock > 0 and voucher_id = ?
-                boolean isSuccess = seckillVoucherService.update()
-                        .setSql("stock = stock - 1")
-                        .gt("stock",0)
-                        .eq("voucher_id", voucherId).update();
-
-                if(!isSuccess) {
+                int result = value.intValue();
+                if(result == 1) {
                     return Result.fail("库存不足！");
                 }
 
+                if(result == 2) {
+                    return Result.fail("不能重复下单！");
+                }
 //        4.生成订单
                 orderId = redisIdGenerate.generateGlobalId("order");
                 VoucherOrder voucherOrder = new VoucherOrder();
@@ -109,40 +172,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 voucherOrder.setCreateTime(LocalDateTime.now());
                 voucherOrder.setUserId(UserHolder.getUser().getId());
                 voucherOrder.setId(orderId);
-                this.save(voucherOrder);
-            } finally {
-                /**
-                 * 解决了误删锁的问题，但是下面两个命令 先get在del这是两个命令不具备原子性，所有还是可能会出现问题
-                 * 解决办法：使用Lua脚本保证原子性
-                 */
-//            String uid = stringRedisTemplate.opsForValue().get(RedisConstants.LOCK_SECKILL_KEY + userId + ":" + voucherId);
-//            if(uuid.equals(uid)) {
-//                stringRedisTemplate.delete(RedisConstants.LOCK_SECKILL_KEY + userId + ":" + voucherId);
-//            }
-                /**
-                 * 使用lua脚本，解决了释放锁的原子问题，但是如果锁自动过期了，但是业务代码还没执行完，还是会会出现并发数据不一致问题
-                 * 解决办法：使用 redisson（watchDog看门狗，锁自动续期）
-                 */
-//            String RELEASE_LOCK_LUA =
-//                    "if redis.call('GET', KEYS[1]) == ARGV[1] then " +
-//                            "    return redis.call('DEL', KEYS[1]) " +
-//                            "else " +
-//                            "    return 0 " +
-//                            "end";
-//            RedisScript<Long> redisScript = new DefaultRedisScript<>(RELEASE_LOCK_LUA);
-//
-//            stringRedisTemplate.execute(
-//                    redisScript,
-//                    Collections.singletonList(RedisConstants.LOCK_SECKILL_KEY + userId + ":" + voucherId),
-//                    uuid);
-
-                lock.unlock();
-
-            }
-
-        } catch (InterruptedException e) {
-            return Result.fail("操作被中断，请重试");
-        }
+//              在主线程中获取当前代理对象, 由于是spring的事务是放在threadLocal中，下面的是多线程，事务会失效
+                proxy = (VoucherOrderServiceImpl)AopContext.currentProxy();
+                voucherOrderTaskQueue.add(voucherOrder);
 
 //        5.返回订单id
         return Result.ok(orderId);
