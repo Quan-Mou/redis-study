@@ -8,8 +8,11 @@ import com.hmdp.entity.Blog;
 import com.hmdp.entity.User;
 import com.hmdp.service.IBlogService;
 import com.hmdp.service.IUserService;
+import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
@@ -31,6 +34,8 @@ public class BlogController {
     private IBlogService blogService;
     @Resource
     private IUserService userService;
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
 
     @PostMapping
     public Result saveBlog(@RequestBody Blog blog) {
@@ -43,12 +48,19 @@ public class BlogController {
         return Result.ok(blog.getId());
     }
 
+    @GetMapping("/likes/{id}")
+    public Result like(@PathVariable("id") Long id) {
+        return blogService.like(id);
+    }
+
+    @GetMapping("/{id}")
+    public Result getBlogById(@PathVariable("id") Long id) {
+       return blogService.queryBlogByID(id);
+    }
+
     @PutMapping("/like/{id}")
     public Result likeBlog(@PathVariable("id") Long id) {
-        // 修改点赞数量
-        blogService.update()
-                .setSql("liked = liked + 1").eq("id", id).update();
-        return Result.ok();
+        return blogService.goLike(id);
     }
 
     @GetMapping("/of/me")
@@ -77,7 +89,10 @@ public class BlogController {
             User user = userService.getById(userId);
             blog.setName(user.getNickName());
             blog.setIcon(user.getIcon());
+            Double score = stringRedisTemplate.opsForZSet().score(RedisConstants.BLOG_LIKED_KEY + blog.getId(), user.getId().toString());
+            blog.setIsLike(!(score == null));
         });
+
         return Result.ok(records);
     }
 }

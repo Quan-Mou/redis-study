@@ -33,7 +33,7 @@ public class UploadController {
             throw new RuntimeException("文件上传失败", e);
         }
     }
-
+                
     @GetMapping("/blog/delete")
     public Result deleteBlogImg(@RequestParam("name") String filename) {
         File file = new File(SystemConstants.IMAGE_UPLOAD_DIR, filename);
@@ -55,7 +55,15 @@ public class UploadController {
         // 判断目录是否存在
         File dir = new File(SystemConstants.IMAGE_UPLOAD_DIR, StrUtil.format("/blogs/{}/{}", d1, d2));
         if (!dir.exists()) {
-            dir.mkdirs();
+            boolean mkdirs = dir.mkdirs();
+            if(!mkdirs) {
+                log.error("无法创建目录！路径: {}, 父目录是否存在: {}, 是否可写: {}",
+                        dir.getAbsolutePath(),
+                        dir.getParentFile().exists(),
+                        dir.getParentFile().canWrite()
+                );
+                throw new RuntimeException("创建目录失败");
+            }
         }
         // 生成文件名
         return StrUtil.format("/blogs/{}/{}/{}.{}", d1, d2, name, suffix);

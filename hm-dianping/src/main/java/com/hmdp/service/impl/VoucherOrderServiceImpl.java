@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.json.JSONUtil;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.VoucherOrder;
@@ -79,14 +80,13 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     }
 
 
-    @Resource
-    private ApplicationContext applicationContext;
-
     private static ExecutorService voucherOrderWorker = Executors.newSingleThreadExecutor();
 
     private static BlockingQueue<VoucherOrder> voucherOrderTaskQueue = new LinkedBlockingQueue<>(300);
 
     private VoucherOrderServiceImpl proxy;
+    private Long userId;
+    private Long curVoucherId;
 
 
     @PostConstruct
@@ -94,9 +94,16 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         voucherOrderWorker.execute(() -> {
             while (true) {
                 try {
-                    VoucherOrder order = voucherOrderTaskQueue.take();
-                    proxy.createVoucherOrder(order);
-                } catch (InterruptedException e) {
+//                    VoucherOrder order = voucherOrderTaskQueue.take();
+                    String result = stringRedisTemplate.opsForList()
+                            .rightPop(RedisConstants.SECKILL_ORDER_KEY+":queue", 0, TimeUnit.SECONDS);
+                    log.info("消息：{}",result);
+                    if (result != null) {
+//                      这个proxy一定要放在异步执行之外获取
+                        proxy.createVoucherOrder(JSONUtil.toBean(result, VoucherOrder.class));
+                    }
+
+                } catch (Exception e) {
                     log.info("创建订单出现异常:{}",e.getMessage());
                 }
             }
@@ -119,7 +126,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                     .setSql("stock = stock - 1")
                     .gt("stock",0)
                     .eq("voucher_id", voucherOrder.getVoucherId()).update();
-
+//            log.info("手动抛异常，测试事务有没有生效");
+//            String a = null;
+//            a.toString();
 
 //      2.添加订单数据
 //        手动获取代理对象
@@ -150,12 +159,13 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
 
         Long orderId = null;
-        Long userId = UserHolder.getUser().getId();
-        String uuid = UUID.randomUUID().toString();
+        userId = UserHolder.getUser().getId();
+        curVoucherId = seckillVoucher.getVoucherId();
+
                 Long value = stringRedisTemplate.execute(redisScript, Collections.singletonList(voucherId.toString()), userId.toString());
 
                 if(value == null) {
-                    return Result.fail("库存不足！");
+                    return Result.fail("做啥呀，先去添加秒杀卷！");
                 }
                 int result = value.intValue();
                 if(result == 1) {
@@ -174,7 +184,11 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 voucherOrder.setId(orderId);
 //              在主线程中获取当前代理对象, 由于是spring的事务是放在threadLocal中，下面的是多线程，事务会失效
                 proxy = (VoucherOrderServiceImpl)AopContext.currentProxy();
-                voucherOrderTaskQueue.add(voucherOrder);
+//                voucherOrderTaskQueue.add(voucherOrder);
+//              放入到redis中list容器中
+                stringRedisTemplate.opsForList()
+                        .rightPush(RedisConstants.SECKILL_ORDER_KEY+":queue",
+                        JSONUtil.toJsonStr(voucherOrder));
 
 //        5.返回订单id
         return Result.ok(orderId);

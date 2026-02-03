@@ -26,7 +26,6 @@ public class InterceptHandler implements HandlerInterceptor {
         String token = request.getHeader("authorization");
 
         Object user = redisTemplate.opsForValue().get(token);
-        System.out.println("Redis receive User" + user);
         if(user == null){
             response.setStatus(401);
             return false;
