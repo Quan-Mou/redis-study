@@ -1,22 +1,31 @@
 package com.hmdp.controller;
 
 
+import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Blog;
+import com.hmdp.entity.Follow;
 import com.hmdp.entity.User;
 import com.hmdp.service.IBlogService;
+import com.hmdp.service.IFollowService;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.websocket.server.PathParam;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * <p>
@@ -28,6 +37,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/blog")
+@Slf4j
 public class BlogController {
 
     @Resource
@@ -36,6 +46,33 @@ public class BlogController {
     private IUserService userService;
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    private IFollowService  followService;
+
+
+    /**
+     * 返回用户发布的博客列表
+     * @param id 用户id
+     * @param current
+     * @return
+     */
+    @GetMapping("/of/user")
+    public Result userBlog(@PathParam("id") Long id,@PathParam("current") Long current) {
+        return blogService.getUserBlog(id,current);
+
+    }
+
+
+    /**
+     * 推送的关注的人的博客
+     * @return
+     */
+    @GetMapping("/of/follow")
+    public Result follow() {
+        return null;
+    }
+
 
     @PostMapping
     public Result saveBlog(@RequestBody Blog blog) {
@@ -48,6 +85,11 @@ public class BlogController {
         return Result.ok(blog.getId());
     }
 
+    /**
+     * 返回点赞博客的用户信息
+     * @param id 博客id
+     * @return
+     */
     @GetMapping("/likes/{id}")
     public Result like(@PathVariable("id") Long id) {
         return blogService.like(id);
@@ -58,10 +100,16 @@ public class BlogController {
        return blogService.queryBlogByID(id);
     }
 
+    /**
+     * 博客点赞
+     * @param id
+     * @return
+     */
     @PutMapping("/like/{id}")
     public Result likeBlog(@PathVariable("id") Long id) {
         return blogService.goLike(id);
     }
+
 
     @GetMapping("/of/me")
     public Result queryMyBlog(@RequestParam(value = "current", defaultValue = "1") Integer current) {

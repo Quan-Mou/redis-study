@@ -25,4 +25,10 @@ public class RedisConstants {
     public static final String FEED_KEY = "feed:";
     public static final String SHOP_GEO_KEY = "shop:geo:";
     public static final String USER_SIGN_KEY = "sign:";
+
+
+    public static final String USER_FOLLOW_KEY =  "user:follow:";
+
+    public static final String COMMON_FOLLOW_KEY =  "user:common:follow:";
+
 }

@@ -136,4 +136,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 //       把这个key返回，后续请求都携带返回的key进行校验
         return Result.ok(key);
     }
+
+    @Override
+    public Result getUserById(Long id) {
+        User user = getById(id);
+        if (user == null) {
+            return Result.fail("用户不存在！");
+
+        }
+        return Result.ok(BeanUtil.copyProperties(user, UserDTO.class));
+    }
 }

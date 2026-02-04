@@ -101,6 +101,11 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         return Result.ok();
     }
 
+    @Override
+    public Result getUserBlog(Long id,Long current) {
+        return Result.ok(query().eq("user_id", id).list());
+    }
+
     public boolean isLiketd(Long id) {
         Long userId = UserHolder.getUser().getId();
         if(userId == null) {

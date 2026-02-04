@@ -4,6 +4,8 @@ import com.hmdp.dto.Result;
 import com.hmdp.entity.Blog;
 import com.baomidou.mybatisplus.extension.service.IService;
 
+import javax.websocket.server.PathParam;
+
 /**
  * <p>
  *  服务类
@@ -19,4 +21,7 @@ public interface IBlogService extends IService<Blog> {
     Result like(Long id);
 
     Result goLike(Long id);
+
+    Result getUserBlog(Long id,Long current);
+
 }
