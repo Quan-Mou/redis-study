@@ -55,9 +55,12 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
         follow.setFollowUserId(id);
         follow.setUserId(currentUserId);
         save(follow);
-//        2.缓存数据库添加
+//        2.缓存数据库添加(粉丝、关注缓存)
         long score = System.currentTimeMillis();
+//        当前用户关注的人
         stringRedisTemplate.opsForZSet().add(RedisConstants.USER_FOLLOW_KEY + currentUserId,id.toString(),score);
+//        添加被关注的人粉丝缓存
+        stringRedisTemplate.opsForZSet().add(RedisConstants.USER_FANS_KEY + id,currentUserId.toString(),score);
         return Result.ok();
     }
 
@@ -75,7 +78,11 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
             return Result.fail("取关失败，稍后再试！");
         }
 //        2.缓存数据库删除
+//       在我关注的人缓存中删除
         stringRedisTemplate.opsForZSet().remove(RedisConstants.USER_FOLLOW_KEY + currentUserId,id.toString());
+//        在我关注的人粉丝中缓存中删除
+        stringRedisTemplate.opsForZSet().remove(RedisConstants.USER_FANS_KEY + id,currentUserId.toString());
+//       在我的收信箱中删除原本关注的用户发布的博文id
         return Result.ok();
     }
 
@@ -96,14 +103,14 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
         Long result = stringRedisTemplate.opsForZSet()
                 .intersectAndStore(RedisConstants.USER_FOLLOW_KEY + userId,
                         RedisConstants.USER_FOLLOW_KEY + id,
-                        RedisConstants.COMMON_FOLLOW_KEY + userId + "_" + id);
+                        RedisConstants.USER_COMMON_FOLLOW_KEY + userId + "_" + id);
         if(result == null || result == 0) { // 添加失败
             return Result.ok(Collections.emptyList());
         }
-        Long size = stringRedisTemplate.opsForZSet().size(RedisConstants.COMMON_FOLLOW_KEY + userId + "_" + id);
+        Long size = stringRedisTemplate.opsForZSet().size(RedisConstants.USER_COMMON_FOLLOW_KEY + userId + "_" + id);
         List<Long> commonIds = stringRedisTemplate
                 .opsForZSet()
-                .reverseRange(RedisConstants.COMMON_FOLLOW_KEY + userId + "_" + id, 0, size)
+                .reverseRange(RedisConstants.USER_COMMON_FOLLOW_KEY + userId + "_" + id, 0, size)
                 .stream().map(Long::valueOf).collect(Collectors.toList());
         String idStr = commonIds.stream().map(String::valueOf).collect(Collectors.joining(","));
 

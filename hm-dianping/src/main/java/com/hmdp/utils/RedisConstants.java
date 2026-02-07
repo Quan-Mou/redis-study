@@ -28,7 +28,16 @@ public class RedisConstants {
 
 
     public static final String USER_FOLLOW_KEY =  "user:follow:";
+    public static final String USER_FANS_KEY =  "user:fans:";
 
-    public static final String COMMON_FOLLOW_KEY =  "user:common:follow:";
+    /**
+     * 共同关注
+     */
+    public static final String USER_COMMON_FOLLOW_KEY =  "user:common:follow:";
+
+    /**
+     * 用户收件箱
+     */
+    public static final String USER_LETTERBOX_KEY =  "user:letterBox:";
 
 }

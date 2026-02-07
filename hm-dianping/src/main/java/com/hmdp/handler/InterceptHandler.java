@@ -24,7 +24,10 @@ public class InterceptHandler implements HandlerInterceptor {
 
 //        UserDTO user = (UserDTO)request.getSession().getAttribute("user");
         String token = request.getHeader("authorization");
-
+        if(token == null){
+            response.setStatus(401);
+            return false;
+        }
         Object user = redisTemplate.opsForValue().get(token);
         if(user == null){
             response.setStatus(401);
