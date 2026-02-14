@@ -1,14 +1,12 @@
 package com.hmdp.controller;
 
 
-import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.BlogPageResponse;
 import com.hmdp.dto.FollowBlogVO;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Blog;
-import com.hmdp.entity.Follow;
 import com.hmdp.entity.User;
 import com.hmdp.service.IBlogService;
 import com.hmdp.service.IFollowService;
@@ -18,10 +16,7 @@ import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.redis.connection.DataType;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
@@ -167,9 +162,6 @@ public class BlogController {
 //                   粉丝的收信箱是懒创建的
                     // 获取粉丝的收信箱，把博文id存进去
                     Boolean isSuccess = stringRedisTemplate.opsForZSet().add(RedisConstants.USER_LETTERBOX_KEY + fanId, blog.getId().toString(), blog.getUpdateTime().toEpochSecond(ZoneOffset.UTC));
-//                    if(!isSuccess) { // 创建粉丝的收件箱
-//
-//                    }
                 });
             }
         }

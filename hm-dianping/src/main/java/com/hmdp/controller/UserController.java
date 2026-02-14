@@ -43,6 +43,20 @@ public class UserController {
     }
 
 
+    /**
+     * 用户签到
+     */
+    @PostMapping("/sign")
+    public Result sign() {
+        return userService.sign();
+    }
+
+
+    @GetMapping("/sign/count")
+    public Result signCount() {
+        return userService.signCount();
+    }
+
 
     /**
      * 发送手机验证码

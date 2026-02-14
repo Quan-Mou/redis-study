@@ -7,18 +7,28 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.LoginFormDTO;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
+import com.hmdp.entity.Sign;
 import com.hmdp.entity.User;
 import com.hmdp.mapper.UserMapper;
+import com.hmdp.service.ISignService;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.RegexUtils;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.connection.BitFieldSubCommands;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Date;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -35,6 +45,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     @Resource
     private RedisTemplate redisTemplate;
+
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    private ISignService signService;
 
 
     @Override
@@ -146,4 +162,101 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         }
         return Result.ok(BeanUtil.copyProperties(user, UserDTO.class));
     }
+
+    @Override
+    public Result sign() {
+//        1.判断当天是否签到
+        LocalDateTime now = LocalDateTime.now();
+        int year = now.getYear();
+        int month = now.getMonth().getValue();
+        int day = now.getDayOfMonth();
+        Long userId = UserHolder.getUser().getId();
+        if(userId == null){
+            return Result.fail("请先登录");
+        }
+        String key = RedisConstants.USER_SIGN_KEY + userId + ":" + year + "_" + month;
+        if (stringRedisTemplate.hasKey(key)) {
+//          当前月有过签到记录,判断是否签到过，没签则签到，签了直接返回
+            if (Boolean.TRUE.equals(stringRedisTemplate.opsForValue().getBit(key, day - 1))) {
+                return Result.ok("已经签到过了");
+            }
+            stringRedisTemplate.opsForValue().setBit(key,day-1,true);
+            Sign sign = new Sign();
+            sign.setUserId(userId);
+            sign.setYear(year);
+            sign.setMonth((byte) month);
+            sign.setDate(Date.from(now.atZone(ZoneId.systemDefault()).toInstant()));
+            signService.save(sign);
+            return Result.ok(true);
+        }
+//        如果没签到，则去签到，签到信息每个用户的一个月为一个key：sign:userId:年份_月份 = 31的bit
+//        先判断当月有没有签到过，如果当前月没有签到过，创建key，并且计算当前天是该月的第几天，offset添加bit为1，当前天之前的天数都设置为0(默认为0)
+        stringRedisTemplate.opsForValue().setBit(key,day-1,true);
+        Sign sign = new Sign();
+        sign.setUserId(userId);
+        sign.setYear(year);
+        sign.setMonth((byte) month);
+        sign.setDate(Date.from(now.atZone(ZoneId.systemDefault()).toInstant()));
+        signService.save(sign);
+        return Result.ok(true);
+    }
+
+    @Override
+    public Result signCount() {
+        return Result.ok(statisticContinuousSign());
+    }
+
+    /**
+     * 统计月份签到次数
+     * @param now
+     * @return
+     */
+    public long statisticSign(LocalDateTime now) {
+        Long userId = UserHolder.getUser().getId();
+        String key =  RedisConstants.USER_SIGN_KEY + userId + ":" + now.getYear() + "_" + now.getMonth().getValue();
+        return stringRedisTemplate.execute(
+                (RedisCallback<Long>) connection ->
+                        connection.bitCount(key.getBytes(StandardCharsets.UTF_8))
+        );
+    }
+
+    /**
+     * 统计当前用户的连续签到天数
+     */
+    public long statisticContinuousSign() {
+        Long userId = UserHolder.getUser().getId();
+        LocalDateTime now = LocalDateTime.now();
+        String key =  RedisConstants.USER_SIGN_KEY + userId + ":" + now.getYear() + "_" + now.getMonth().getValue();
+        int day = LocalDateTime.now().getDayOfMonth();
+        List<Long> result = stringRedisTemplate.execute(
+                (RedisCallback<List<Long>>) connection -> {
+                    return connection.bitField(
+                            key.getBytes(StandardCharsets.UTF_8),
+                            BitFieldSubCommands.create()
+                                    .get(BitFieldSubCommands.BitFieldType.unsigned(day)).valueAt(0)
+                    );
+                }
+        );
+        if(result == null || result.isEmpty()){
+            return 0L;
+        }
+        Long byteSign = result.get(0);
+        if(byteSign == null){
+            return 0L;
+        }
+        String byteString = Long.toBinaryString(byteSign);
+        int length = byteString.length();
+        int count  = 0;
+        for (int i = length -1; i>=0 ; i--) {
+            char byteV = byteString.charAt(i);
+            if(byteV == '1') {
+                count++;
+            }
+            if(byteV == '0') {
+                break;
+            }
+        }
+        return count;
+    }
+
 }

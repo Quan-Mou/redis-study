@@ -30,7 +30,7 @@ public class RedisConstants {
     public static final String USER_FOLLOW_KEY =  "user:follow:";
     public static final String USER_FANS_KEY =  "user:fans:";
 
-    /**
+    /**ƒ
      * 共同关注
      */
     public static final String USER_COMMON_FOLLOW_KEY =  "user:common:follow:";
