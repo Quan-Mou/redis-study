@@ -53,7 +53,7 @@ public class LoadShopGeoTest {
             v.forEach(shop->{
                 Point point = new Point(shop.getX(), shop.getY());
                 stringRedisTemplate.opsForGeo()
-                        .add("shops:geo:" + k, point, shop.getId().toString());
+                        .add("shop:geo:" + k, point, shop.getId().toString());
             });
         });
     }

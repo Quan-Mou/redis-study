@@ -18,4 +18,6 @@ public interface IShopService extends IService<Shop> {
     Result queryShopByIdAddCache(Long id);
 
     Result updateByIdAsCache(Shop shop);
+
+    Result shopByGeo(Integer typeId, Integer current, String x, String y);
 }

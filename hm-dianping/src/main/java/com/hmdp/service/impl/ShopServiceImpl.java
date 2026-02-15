@@ -11,6 +11,9 @@ import com.hmdp.service.IShopService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.RedisExpire;
+import com.hmdp.utils.SystemConstants;
+import org.springframework.data.geo.*;
+import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -18,8 +21,7 @@ import org.springframework.util.StringUtils;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -198,7 +200,41 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         this.updateById(shop);
 //        2.删除缓存（如果是高并发的场景下还需要进行一次延迟删缓存）
         stringRedisTemplate.delete(RedisConstants.CACHE_SHOP_KEY + shop.getId());
-
         return Result.ok(shop);
+    }
+
+    @Override
+    public Result shopByGeo(Integer typeId, Integer current, String x, String y) {
+//        返回5km内的店铺信息，降序
+//        shop:geo:类型Id
+        String key = RedisConstants.SHOP_GEO_KEY + typeId;
+        Point point = new Point(Double.parseDouble(x), Double.parseDouble(y)); // 经纬度
+        Distance distance = new Distance(5, Metrics.KILOMETERS);// 5km
+        RedisGeoCommands.GeoRadiusCommandArgs args = RedisGeoCommands.GeoRadiusCommandArgs
+                .newGeoRadiusArgs()
+                .includeDistance()     // 返回距离
+                .includeCoordinates()  // 返回坐标
+                .sortAscending();       // 按距离升序
+        GeoResults<RedisGeoCommands.GeoLocation<String>> results = stringRedisTemplate.opsForGeo().radius(key, new Circle(point, distance), args);
+        if(results == null) {
+            return Result.ok(Collections.emptyList());
+        }
+        List<Long> shopIds = new ArrayList<>();
+        List<Double> position = new ArrayList<>();
+        results.iterator().forEachRemaining(geoLocation -> {
+            shopIds.add(Long.parseLong(geoLocation.getContent().getName()));
+            position.add(geoLocation.getDistance().getValue());
+        });
+        List<Shop> shops = listByIds(shopIds);
+        if(shops.isEmpty()) {
+            return Result.ok(Collections.emptyList());
+        }
+        for (int i = 0; i < shops.size() ; i++) {
+            shops.get(i).setDistance(position.get(i));
+        }
+//      逻辑分页：
+        int start = (current - 1) * SystemConstants.DEFAULT_PAGE_SIZE;
+        int end = Math.min(start + SystemConstants.DEFAULT_PAGE_SIZE, shops.size());
+        return Result.ok(shops.subList(Math.min(start, shops.size()), end));
     }
 }
