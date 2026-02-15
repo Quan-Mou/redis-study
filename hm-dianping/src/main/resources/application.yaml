@@ -27,3 +27,4 @@ mybatis-plus:
 logging:
   level:
     com.hmdp: debug
+JWTSecret: quanMou_secret

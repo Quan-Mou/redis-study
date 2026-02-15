@@ -26,9 +26,6 @@ public class FollowController {
 
     @Resource
     private IFollowService followService;
-    @Autowired
-    private StringRedisTemplate stringRedisTemplate;
-
 
     /**
      * 查看共同关注的好友
@@ -41,9 +38,6 @@ public class FollowController {
     }
 
 
-
-
-
     /**
      * 是否关注该blog的用户
      * @param id
@@ -54,7 +48,6 @@ public class FollowController {
        return  followService.isFollow(id);
     }
 
-
     /**
      * 关注用户
      * @param id
@@ -64,7 +57,6 @@ public class FollowController {
     public Result follow(@PathVariable("id") Long id) {
         return followService.follow(id);
     }
-
 
     /**
      * 取消关注用户

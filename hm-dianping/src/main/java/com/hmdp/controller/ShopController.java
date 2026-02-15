@@ -34,11 +34,6 @@ public class ShopController {
 
     @Resource
     public IShopService shopService;
-    @Autowired
-    private StringRedisTemplate stringRedisTemplate;
-
-    @Resource
-    private RedisTemplate redisTemplate;
 
     /**
      * 根据id查询商铺信息
@@ -48,7 +43,6 @@ public class ShopController {
     @GetMapping("/{id}")
     public Result queryShopById(@PathVariable("id") Long id) {
         return shopService.queryShopByIdAddCache(id);
-//        return Result.ok(shopService.getById(id));
     }
 
     /**
@@ -87,9 +81,7 @@ public class ShopController {
             @RequestParam(required = false) String x,
             @RequestParam(required = false) String y
     ) {
-
         return shopService.shopByGeo(typeId,current,x,y);
-
     }
 
 

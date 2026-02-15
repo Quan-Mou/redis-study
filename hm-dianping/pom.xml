@@ -61,10 +61,15 @@
             <version>3.4.3</version>
         </dependency>
         <!--hutool-->
+<!--        <dependency>-->
+<!--            <groupId>cn.hutool</groupId>-->
+<!--            <artifactId>hutool-ai</artifactId>-->
+<!--            <version>5.8.38</version>-->
+<!--        </dependency>-->
         <dependency>
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-all</artifactId>
-            <version>5.7.17</version>
+            <version>5.8.26</version>
         </dependency>
     </dependencies>
 

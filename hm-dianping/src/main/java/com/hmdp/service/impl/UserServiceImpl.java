@@ -1,7 +1,11 @@
 package com.hmdp.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.util.RandomUtil;
+import cn.hutool.json.JSONUtil;
+import cn.hutool.jwt.JWT;
+import cn.hutool.jwt.signers.JWTSignerUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.LoginFormDTO;
@@ -16,18 +20,20 @@ import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.RegexUtils;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.RedisCallback;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpSession;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -43,14 +49,16 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IUserService {
 
-    @Resource
-    private RedisTemplate redisTemplate;
+
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
     @Resource
     private ISignService signService;
+
+    @Value("${JWTSecret}")
+    private String jwtSecret;
 
 
     @Override
@@ -80,8 +88,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         String code = RandomUtil.randomString(6);
         log.info("code: {}", code);
 //        3.保存验证码
-        redisTemplate.opsForValue().set(RedisConstants.LOGIN_CODE_KEY + phone,code,RedisConstants.LOGIN_CODE_TTL, TimeUnit.MINUTES);
-        return Result.ok();
+        stringRedisTemplate.opsForValue().set(RedisConstants.LOGIN_CODE_KEY + phone,code,RedisConstants.LOGIN_CODE_TTL, TimeUnit.MINUTES);
+        return Result.ok(code);
     }
 
     @Override
@@ -90,13 +98,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         /**
          * session保存在单机服务器中的做法
          */
-////        1.校验手机号
+//        1.校验手机号
 //        if (RegexUtils.isPhoneInvalid(loginForm.getPhone())) {
 //            return Result.fail("请输入正确的手机号");
 //        }
 ////        2.比对验证码
 ////        3.如果验证码不匹配，返回验证码错误
-//        String code = (String)session.getAttribute("code");
+////        String code = (String)session.getAttribute("code");
+//        String code = stringRedisTemplate.opsForValue().get(RedisConstants.LOGIN_CODE_KEY + loginForm.getPhone());
+//        if(code == null) {
+//            return Result.fail("请先获取验证码");
+//        }
+//
 //        if (!code.equals(loginForm.getCode())) {
 //            return Result.fail("请输入正确的验证码");
 //        }
@@ -109,11 +122,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 //            user.setNickName("user_" + RandomUtil.randomString(10));
 //            this.save(user);
 //        }
+//        session.setMaxInactiveInterval(60*60*24*7); // 设置Session过期时间为一个星期
 ////        5.如果存在，则获取该用户信息
 ////        6.保存用户信息到session中
 ////        UserHolder.saveUser(BeanUtil.copyProperties(user, UserDTO.class));
 //        session.setAttribute("user", BeanUtil.copyProperties(user, UserDTO.class));
-
+//        UserHolder.saveUser(user);
+//        return Result.ok();
 
         /**
          * 使用Redis中的做法
@@ -125,9 +140,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         }
 //        2.比对验证码
 //        3.如果验证码不匹配，返回验证码错误
-        Object code = redisTemplate.opsForValue().get(RedisConstants.LOGIN_CODE_KEY + loginForm.getPhone());
+        String code = stringRedisTemplate.opsForValue().get(RedisConstants.LOGIN_CODE_KEY + loginForm.getPhone());
         assert code != null;
-        if (!code.toString().equals(loginForm.getCode())) {
+        if (!code.equals(loginForm.getCode())) {
             return Result.fail("请输入正确的验证码");
         }
 //        4.如果验证码匹配，调用数据查看该用户是否存在，如果不存在，则新增该用户信息
@@ -139,18 +154,21 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             user.setNickName("user_" + RandomUtil.randomString(10));
             this.save(user);
         }
-//        5.如果存在，则获取该用户信息
-//        6.保存用户信息到redis中，生一个一个唯一随机的数加入到key中，并且返回，后续请求都需要再请求头中携带这个key，名为token
-//        UserHolder.saveUser(BeanUtil.copyProperties(user, UserDTO.class));
-//        session.setAttribute("user", BeanUtil.copyProperties(user, UserDTO.class));
+//      如果使用JWT生成token，主要是防伪（防止修改），那就可以不使用redis来存储这个信息，弊端是无法主动过期，这里为了应用redis，还是把这个token加入到redis中了，优点是登录可控
+        HashMap<String, Long> map = new HashMap<>();
+        map.put("userId", user.getId());
+        String token = JWT.create()
+                .addPayloads(map)
+                .setExpiresAt(DateUtil.offsetDay(new Date(), 7))
+                .setSigner(JWTSignerUtil.hs256(jwtSecret.getBytes()))
+                .sign();
 
-        String key = RedisConstants.LOGIN_USER_KEY  +  RandomUtil.randomString(10);
-
-        redisTemplate.opsForValue().set(key ,BeanUtil.copyProperties(user, UserDTO.class));
-
-
+        String key = RedisConstants.LOGIN_USER_KEY + token;
+        stringRedisTemplate.opsForValue().set(key , JSONUtil.toJsonStr(user), RedisConstants.LOGIN_USER_TTL, TimeUnit.MINUTES);
+        UserHolder.saveUser(BeanUtil.copyProperties(user,UserDTO.class));
 //       把这个key返回，后续请求都携带返回的key进行校验
-        return Result.ok(key);
+        return Result.ok(token);
+
     }
 
     @Override
@@ -204,6 +222,21 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     @Override
     public Result signCount() {
         return Result.ok(statisticContinuousSign());
+    }
+
+    @Override
+    public Result logout(HttpServletRequest request) {
+        String token = request.getHeader("authorization");
+        if(token == null){
+            return Result.fail("请先登录");
+        }
+//        删除redis中的token即可
+        Long userId = UserHolder.getUser().getId();
+        if(userId == null){
+            return Result.fail("先登录");
+        }
+        stringRedisTemplate.delete(RedisConstants.LOGIN_USER_KEY + token);
+        return Result.ok();
     }
 
     /**
